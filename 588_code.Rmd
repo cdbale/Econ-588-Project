@@ -58,6 +58,10 @@ for (i in seq_along(years)) {
     bind_rows(full)
   
 }
+
+rm(full)
+
+save(full_data, file = 'full_data.RData')
 ```
 
 Create sales variable.
