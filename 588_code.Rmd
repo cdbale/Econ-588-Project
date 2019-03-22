@@ -1,0 +1,97 @@
+---
+title: "588 Project"
+subtitle: "Cameron Bale"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Install and load packages. Increase memory limit.
+```{r}
+#install.packages('tidyverse')
+#install.packages('quantreg')
+library(tidyverse)
+library(quantreg)
+memory.limit(size = 50000)
+```
+
+Create a loop that:
+
+* reads in the data for a given year (2010 - 2013)
+* combines the movement data with the store file for the year
+* filters for grocery stores in Utah
+* joins with the upc file
+* saves the full data file
+```{r}
+products <- read_tsv('products.tsv', quote = "")
+
+years <- c(10, 11, 12, 13)
+
+for (i in seq_along(years)) {
+
+  move <- read_tsv(paste0('1344_20', years[i], '.tsv'))
+  stores <- read_tsv(paste0('stores_20', years[i], '.tsv'), guess_max = 200000)
+
+  full <- move %>%
+    inner_join(stores, by = 'store_code_uc') %>%
+    filter(channel_code == 'F' & fips_state_descr == 'UT') %>%
+    inner_join(products, by = 'upc')
+
+  save(full, file = paste0('full_', years[i], '.RData'))
+
+  rm(move, stores, full)
+
+}
+```
+
+Load data for all four years and combine.
+```{r}
+full_data <- tibble()
+
+for (i in seq_along(years)) {
+  
+  load(paste0('full_', years[i], '.RData'))
+  
+  full_data <- full_data %>%
+    bind_rows(full)
+  
+}
+```
+
+Create sales variable.
+```{r}
+full_data <- full_data %>%
+  mutate(sales = units * price)
+```
+
+Calculate total sales for each price level of each upc. Calculate a dataframe with the log versions of price and sales.
+```{r}
+upc_sales <- full_data %>%
+  group_by(upc, price) %>%
+  summarize(sales = sum(sales))
+
+log_upc_sales <- upc_sales %>%
+  mutate(price = log(price), sales = log(sales))
+```
+
+Plot sales at each price level for each upc.
+```{r}
+log_upc_sales %>%
+  ggplot(aes(x = price, y = sales)) +
+  geom_point()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
