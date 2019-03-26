@@ -67,25 +67,141 @@ save(full_data, file = 'full_data.RData')
 Create sales variable.
 ```{r}
 full_data <- full_data %>%
+  filter(price < 12) %>%
   mutate(sales = units * price)
 ```
 
-Calculate total sales for each price level of each upc. Calculate a dataframe with the log versions of price and sales.
+Calculate total sales for each price level of each upc. Calculate a dataframe with the log versions of price and 
+sales.
 ```{r}
 upc_sales <- full_data %>%
   group_by(upc, price) %>%
-  summarize(sales = sum(sales))
+  summarize(sales = sum(sales)) %>%
+  mutate(units = sales / price)
 
 log_upc_sales <- upc_sales %>%
-  mutate(price = log(price), sales = log(sales))
+  mutate(price = log(price), sales = log(sales), units = log(units))
 ```
 
-Plot sales at each price level for each upc.
+Plot sales at each price level for each upc and include the regular OLS line.
 ```{r}
+qs <- 1:9/10
+
 log_upc_sales %>%
   ggplot(aes(x = price, y = sales)) +
-  geom_point()
+  geom_point() +
+  geom_smooth(method = 'lm', col = 'red', se = FALSE) +
+  geom_quantile(quantiles = qs)
 ```
+
+Plot price against units sold. (demand curve for cereal category)
+```{r}
+log_upc_sales %>%
+  ggplot(aes(x = units, y = price)) +
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'red') +
+  geom_quantile(quantiles = qs)
+```
+
+Run simple OLS regression of sales on price.
+```{r}
+log_upc_sales %>%
+  lm(sales ~ price, data = .) %>%
+  summary()
+```
+
+Run simple OLS regression of price on units.
+```{r}
+log_upc_sales %>%
+  lm(price ~ units, data = .) %>%
+  summary()
+```
+
+Quantile regression for sales on price.
+```{r}
+qr_sp <- log_upc_sales %>%
+  rq(sales ~ price, data = ., tau = qs)
+```
+
+Plot significance of quantile coefficient estimates.
+```{r}
+plot(summary(qr_sp), parm = "price")
+```
+
+Regression of price on units.
+```{r}
+qr_pu <- log_upc_sales %>%
+  rq(price ~ units, data = ., tau = qs)
+```
+
+Plot significance of quantile coefficient estimates.
+```{r}
+plot(summary(qr_pu), parm = "units")
+```
+
+Add brand description to data.
+```{r}
+full_brands <- full_data %>%
+  select(upc, brand_descr, brand_code_uc) %>%
+  distinct() %>%
+  arrange(upc)
+
+temp <- log_upc_sales %>%
+  left_join(full_brands, by = 'upc')
+```
+
+Create a vector 'mult_brands' for upcs that have multiple brand descriptions.
+```{r}
+upcs <- unique(full_brands$upc)
+mult_brands <- c()
+
+for (i in seq_along(upcs)) {
+  
+  brand_test <- full_brands %>%
+    filter(upc == upcs[i])
+
+  if (nrow(brand_test) > 1) {
+  
+    mult_brands <- c(mult_brands, upcs[i])
+  
+  }
+}
+```
+
+Remove brands with multiple descriptions from data.
+```{r}
+full_brands <- full_brands %>%
+  filter(!upc %in% mult_brands)
+
+log_upc_sales <- log_upc_sales %>%
+  filter(!upc %in% mult_brands)
+```
+
+Join brand descriptions to log upc sales.
+```{r}
+temp <- log_upc_sales %>%
+  left_join(full_brands, by = 'upc')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
