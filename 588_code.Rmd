@@ -4,10 +4,6 @@ subtitle: "Cameron Bale"
 output: github_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
 Install and load packages. Increase memory limit.
 ```{r}
 #install.packages('tidyverse')
@@ -128,7 +124,7 @@ Plot significance of quantile coefficient estimates.
 plot(summary(qr_sp), parm = "price")
 ```
 
-Regression of price on units.
+Quantile regression of price on units.
 ```{r}
 qr_pu <- log_upc_sales %>%
   rq(price ~ units, data = ., tau = qs)
@@ -139,15 +135,12 @@ Plot significance of quantile coefficient estimates.
 plot(summary(qr_pu), parm = "units")
 ```
 
-Add brand description to data.
+Get unique upc and brand combinations.
 ```{r}
 full_brands <- full_data %>%
   select(upc, brand_descr, brand_code_uc) %>%
   distinct() %>%
   arrange(upc)
-
-temp <- log_upc_sales %>%
-  left_join(full_brands, by = 'upc')
 ```
 
 Create a vector 'mult_brands' for upcs that have multiple brand descriptions.
@@ -179,15 +172,47 @@ log_upc_sales <- log_upc_sales %>%
 
 Join brand descriptions to log upc sales.
 ```{r}
-temp <- log_upc_sales %>%
+log_upc_sales <- log_upc_sales %>%
   left_join(full_brands, by = 'upc')
 ```
 
+Examine occurrences of sales/promotions.
+```{r}
+sale_promo <- full_data %>%
+  filter(!is.na(feature) & !is.na(display))
 
+sale_promo %>%
+  arrange(store_code_uc, upc, week_end, price)
+```
 
+Examine 1 upc.
+```{r}
+one_upc <- sale_promo %>%
+  filter(upc == "001600014772")
 
+one_upc %>%
+  ggplot(aes(x = log(units), y = log(price))) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE)
+```
 
+Regression of price on units for single upc.
+```{r}
+one_upc %>%
+  lm(log(price) ~ log(units), data = .) %>%
+  summary()
+```
 
+Regression of price on units, feature, and display for single upc.
+```{r}
+one_upc %>%
+  lm(log(units) ~ log(price) + feature + display, data = .) %>%
+  summary()
+```
+
+```{r}
+log_upc_sales
+```
 
 
 

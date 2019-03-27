@@ -1,0 +1,184 @@
+---
+title: "588 Final Project"
+author: "Cameron Bale"
+date: "March 27, 2019"
+output: github_document
+---
+
+I plan to model the number of units of cereal sold based on several independent variables. I will examine the ability
+to make inference using the model based on different implementations of standard errors. The data is at the level of,
+"How many units of a given upc were sold in a given store in a given week?"
+
+***
+
+Install and load packages. Increase memory limit.
+```{r}
+#install.packages('tidyverse')
+#install.packages('quantreg')
+library(tidyverse)
+library(quantreg)
+library(lubridate)
+memory.limit(size = 50000)
+```
+
+# Reading in the Data
+
+Create a loop that:
+
+* reads in the data for a given year (2010 - 2013)
+* combines the movement data with the store file for the year
+* filters for grocery stores in Utah
+* joins with the upc file
+* saves the full data file
+```{r}
+products <- read_tsv('products.tsv', quote = "")
+
+years <- c(10, 11, 12, 13)
+
+for (i in seq_along(years)) {
+
+  move <- read_tsv(paste0('1344_20', years[i], '.tsv'))
+  stores <- read_tsv(paste0('stores_20', years[i], '.tsv'), guess_max = 200000)
+
+  full <- move %>%
+    inner_join(stores, by = 'store_code_uc') %>%
+    filter(channel_code == 'F' & fips_state_descr == 'UT') %>%
+    inner_join(products, by = 'upc')
+
+  save(full, file = paste0('full_', years[i], '.RData'))
+
+  rm(move, stores, full)
+
+}
+```
+
+Load data for all four years and combine.
+```{r}
+full_data <- tibble()
+
+for (i in seq_along(years)) {
+  
+  load(paste0('full_', years[i], '.RData'))
+  
+  full_data <- full_data %>%
+    bind_rows(full)
+  
+}
+
+rm(full)
+```
+
+# Data Cleaning
+
+View variable types.
+```{r}
+str(full_data)
+```
+
+Coercing upc and store zip code to proper data types.
+```{r}
+full_data$upc <- as.numeric(full_data$upc)
+full_data$store_zip3 <- as.numeric(full_data$store_zip3)
+```
+
+View summary of continuous, independent variables.
+```{r}
+full_data %>%
+  select(price, units) %>%
+  summary()
+```
+The price variable has some outliers in the max. No box of cereal costs 279, I'm assuming it must be a case that 
+was purchased, but I'm going to drop anything over 12 dollars for this analysis. The units variable is probably skewed
+right.
+
+Calculate 1st and 99th quantiles of data to use to remove outliers.
+```{r}
+price_quantiles <- quantile(full_data$price, probs = c(0.0001, 0.9999))
+unit_quantiles <- quantile(full_data$units, probs = c(0.0001, 0.9999))
+```
+
+Filter for units contained withing the 1st and 99th quantiles of price and units sold.
+```{r}
+full_data <- full_data %>%
+  filter(price > price_quantiles[1] & price < price_quantiles[2],
+         units > unit_quantiles[1] & units < unit_quantiles[2])
+```
+
+Convert week_end into date format, and remove observations that have missing values.
+```{r}
+full_data <- full_data %>%
+  mutate(week_end = ymd(week_end)) %>%
+  drop_na()
+```
+
+View histogram of units sold.
+```{r}
+full_data %>%
+  ggplot(aes(x = units)) +
+  geom_histogram()
+```
+This seems pretty skewed so lets transform it using a natural log.
+
+View histogram of natural log of units sold.
+```{r}
+full_data %>%
+  ggplot(aes(x = log(units))) +
+  geom_histogram()
+```
+This looks a bit better.
+
+View histogram of price.
+```{r}
+full_data %>%
+  ggplot(aes(x = price)) +
+  geom_histogram()
+```
+This looks pretty good.
+
+Let's create a log version of units sold.
+```{r}
+full_data <- full_data %>%
+  mutate(lunits = log(units)) %>%
+  mutate(size = size1_amount)
+```
+
+Save data for future use.
+```{r}
+save(full_data, file = 'full_data.RData')
+```
+
+Visualize data.
+```{r}
+full_data %>%
+  ggplot(aes(x = price, y = lunits)) +
+  geom_point()
+```
+
+# Model
+
+I want to include the following variables to explain the number of units sold.
+
+* **price** : what price was the product sold at.
+* **feature** : All retailer advertisements found in local newspapers, free standing inserts (FSIs), and
+free standing circulars, and may also include online ads from the retailer's website. The vast
+majority of featured items will include a price discount, but they don't have to. Features include
+Major Ads (which typically include an image as well as the price of an item), Line Ads (only has
+the name and price of the item), and retailer coupons that can be redeemed at the register.
+* **display** : Display - a secondary location of an item in the store that is non-permanent and intended for
+merchandising purposes. Displays are located in the Store Lobby, Front of Store, End of Aisle, In
+Aisle, or Back of Store. Displayed items may or may not have an associated price decrease.
+* **size** : size in oz of product
+
+and depending on the model, I'll include fixed effects/clustering/random effects, etc. (tbd) for the following:
+
+* **store_code_uc** : unique store identifier
+* **week_end** : control for seasonality using google trends? identifies the date
+* **year** : gives the year
+* **retailer_code88** : unique retailer identifier
+* **store_zip** : identifies the first three digits of store zip code
+* **fips_county** : identifies the county a store is located in
+
+***** instead of removing all na values, just remove na values for variables of interest
+
+
+
