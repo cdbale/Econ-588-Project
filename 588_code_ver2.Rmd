@@ -91,13 +91,13 @@ The price variable has some outliers in the max. No box of cereal costs 279, I'm
 was purchased, but I'm going to drop anything over 12 dollars for this analysis. The units variable is probably skewed
 right.
 
-Calculate 1st and 99th quantiles of data to use to remove outliers.
+Calculate 0.0001 and 0.9999 quantiles of data to use to remove outliers.
 ```{r}
 price_quantiles <- quantile(full_data$price, probs = c(0.0001, 0.9999))
 unit_quantiles <- quantile(full_data$units, probs = c(0.0001, 0.9999))
 ```
 
-Filter for units contained withing the 1st and 99th quantiles of price and units sold.
+Filter for units contained within the 1st and 99th quantiles of price and units sold.
 ```{r}
 full_data <- full_data %>%
   filter(price > price_quantiles[1] & price < price_quantiles[2],
@@ -107,8 +107,7 @@ full_data <- full_data %>%
 Convert week_end into date format, and remove observations that have missing values.
 ```{r}
 full_data <- full_data %>%
-  mutate(week_end = ymd(week_end)) %>%
-  drop_na()
+  mutate(week_end = ymd(week_end))
 ```
 
 View histogram of units sold.
@@ -147,16 +146,14 @@ Save data for future use.
 save(full_data, file = 'full_data.RData')
 ```
 
-Visualize data.
+Load data.
 ```{r}
-full_data %>%
-  ggplot(aes(x = price, y = lunits)) +
-  geom_point()
+#load('full_data.RData')
 ```
 
 # Model
 
-I want to include the following variables to explain the number of units sold.
+I want to include the following variables to explain the number of units sold;
 
 * **price** : what price was the product sold at.
 * **feature** : All retailer advertisements found in local newspapers, free standing inserts (FSIs), and
@@ -174,11 +171,49 @@ and depending on the model, I'll include fixed effects/clustering/random effects
 * **store_code_uc** : unique store identifier
 * **week_end** : control for seasonality using google trends? identifies the date
 * **year** : gives the year
-* **retailer_code88** : unique retailer identifier
+* **retailer_code** : unique retailer identifier
 * **store_zip** : identifies the first three digits of store zip code
 * **fips_county** : identifies the county a store is located in
 
 ***** instead of removing all na values, just remove na values for variables of interest
+
+```{r}
+full_data <- full_data %>%
+  select(upc, 
+         store_code_uc, 
+         retailer_code, 
+         store_zip3, 
+         fips_county_descr, 
+         week_end, 
+         year,
+         units,
+         lunits,
+         price, 
+         size, 
+         feature, 
+         display) %>%
+  drop_na()
+```
+
+Visualize data.
+```{r}
+full_data %>%
+  ggplot(aes(x = price, y = lunits)) +
+  geom_point() +
+  labs(x = 'Price',
+       y = 'Log Units',
+       title = 'Natural Log of Units Sold Against Price')
+```
+
+Run model.
+```{r}
+full_data %>%
+  lm(lunits ~ price + size + feature + display, data = .) %>%
+  summary()
+```
+
+
+
 
 
 
