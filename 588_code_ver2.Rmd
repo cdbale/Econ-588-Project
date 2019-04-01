@@ -141,6 +141,24 @@ full_data <- full_data %>%
   mutate(size = size1_amount)
 ```
 
+Load in google trends search data for keyword 'cereal'.
+```{r}
+trends <- read_csv('multiTimeline.csv') %>%
+  mutate(week_end = mdy(week_end) + 6)
+```
+
+Filter the trend data so that dates line up.
+```{r}
+trends <- trends %>%
+  filter(week_end < '2014-01-04' & week_end > '2009-12-26')
+```
+
+Join trend data to full data.
+```{r}
+full_data <- full_data %>%
+  left_join(trends, by = 'week_end')
+```
+
 Save data for future use.
 ```{r}
 save(full_data, file = 'full_data.RData')
@@ -175,8 +193,6 @@ and depending on the model, I'll include fixed effects/clustering/random effects
 * **store_zip** : identifies the first three digits of store zip code
 * **fips_county** : identifies the county a store is located in
 
-***** instead of removing all na values, just remove na values for variables of interest
-
 ```{r}
 full_data <- full_data %>%
   select(upc, 
@@ -191,7 +207,8 @@ full_data <- full_data %>%
          price, 
          size, 
          feature, 
-         display) %>%
+         display,
+         search_frequency) %>%
   drop_na()
 ```
 
@@ -207,10 +224,113 @@ full_data %>%
 
 Run model.
 ```{r}
-full_data %>%
-  lm(lunits ~ price + size + feature + display, data = .) %>%
-  summary()
+(mdl_sum <- full_data %>%
+  lm(lunits ~ price + size + feature + display + search_frequency, data = .) %>%
+  summary())
 ```
+
+Converting coefficients to be intrepreted as, for a 1 unit increase in the independent variable, the the number of
+units sold changes by __ percent.
+```{r}
+(mdl_sum$coefficients[,1] <- (exp(mdl_sum$coefficients[,1]) - 1) * 100)
+```
+
+Examining proxy variable. We want it to be correlated with a variable that is difficult or impossible to measure.
+In this case, the google search frequency is a proxy for seasonality.
+```{r}
+cor(full_data$lunits, full_data$search_frequency)
+```
+
+# Ice Cream
+
+Read in files for 2011 (and products file). Merge the data from the 'stores' file and the 'products' master file to the movement file. Filter for channel code 'F', which denotes 'Food' and 
+for the 4 states where supervalue operates (North Dakota, Minnesota, Missouri, and D.C.).
+
+```{r}
+untar("ice_cream.tgz")
+
+move_11<-read_tsv("nielsen_extracts/RMS/2011/Movement_Files/2005_2011/2672_2011.tsv")
+stores_11<-read_tsv("nielsen_extracts/RMS/2011/Annual_Files/stores_2011.tsv")
+products<-read_tsv("nielsen_extracts/RMS/Master_Files/Latest/products.tsv", quote="")
+
+full_11 <- move_11 %>%
+  inner_join(stores_11, by ="store_code_uc") %>% 
+  filter(channel_code == "F" & fips_state_descr == 'UT') %>%
+  inner_join(products, by ="upc")
+
+rm(move_11, stores_11)
+```
+
+Read in files for 2012. Merge the data from the 'stores' file and the 'products' master file to the movement file. Filter for channel code 'F', which denotes 'Food' and 
+for the 4 states where supervalue operates (North Dakota, Minnesota, Missouri, and D.C.).Remove move/stores files from 2011 and 2012 for memory space. 
+
+```{r}
+move_12<-read_tsv("nielsen_extracts/RMS/2012/Movement_Files/2005_2012/2672_2012.tsv")
+stores_12<-read_tsv("nielsen_extracts/RMS/2012/Annual_Files/stores_2012.tsv")
+
+full_12 <- move_12 %>%
+  inner_join(stores_12, by ="store_code_uc") %>% 
+  filter(channel_code == "F" & fips_state_descr == 'UT') %>%
+  inner_join(products, by ="upc")
+
+rm(move_12, stores_12)
+```
+
+Read in files for 2013. Merge the data from the 'stores' file and the 'products' master file to the movement file. Filter for channel code 'F', which denotes 'Food' and 
+for the 4 states where supervalue operates (North Dakota, Minnesota, Missouri, and D.C.).
+
+```{r}
+move_13<-read_tsv("nielsen_extracts/RMS/2013/Movement_Files/2005_2013/2672_2013.tsv")
+stores_13<-read_tsv("nielsen_extracts/RMS/2013/Annual_Files/stores_2013.tsv", guess_max = 200000)
+
+full_13 <- move_13 %>%
+  inner_join(stores_13, by ="store_code_uc") %>% 
+  filter(channel_code == "F" & fips_state_descr == 'UT') %>%
+  inner_join(products, by ="upc")
+```
+
+Combine 'full_11', 'full_12', and 'full_13' into one file, 'full_11_12_13' containing the data for all years.
+Change 'week_end' variable to year-month-day format.
+
+```{r}
+full_data <- full_11 %>%
+  bind_rows(full_12) %>%
+  bind_rows(full_13) %>%
+  mutate(week_end = ymd(week_end))
+```
+
+Read in ice cream trends data.
+```{r}
+trends <- read_csv('ice_cream_trends.csv') %>%
+  mutate(week_end = mdy(week_end) + 6)
+```
+
+Add google search trends to full data.
+```{r}
+full_data <- full_data %>%
+  left_join(trends, by = 'week_end')
+```
+
+Plot search frequency against units sold.
+```{r}
+full_data %>%
+  group_by(week_end) %>%
+  summarize(sales = sum(units * price), level_of_interest = mean(level_of_interest)) %>%
+  gather(key = which_line, value = amount, -week_end) %>%
+  ggplot(aes(x = week_end, y = log(amount), color = which_line)) +
+  geom_line()
+```
+
+```{r}
+cor(full_data$units, full_data$level_of_interest)
+```
+
+
+
+
+
+
+
 
 
 
