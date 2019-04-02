@@ -15,9 +15,13 @@ Install and load packages. Increase memory limit.
 ```{r}
 #install.packages('tidyverse')
 #install.packages('quantreg')
+#install.packages('AER')
+#install.packages('plm')
 library(tidyverse)
 library(quantreg)
 library(lubridate)
+library(plm)
+library(AER)
 memory.limit(size = 50000)
 ```
 
@@ -324,6 +328,54 @@ full_data %>%
 ```{r}
 cor(full_data$units, full_data$level_of_interest)
 ```
+
+# Working with the Standard Errors
+
+With regular standard errors.
+```{r}
+basic_mdl <- full_data %>%
+  lm(lunits ~ price + size + feature + display, data = .)
+
+(basic_mdl_sum <- summary(basic_mdl))
+```
+
+Getting the proper coefficients.
+```{r}
+(basic_mdl_sum$coefficients[,1] <- (exp(basic_mdl_sum$coefficients[,1]) - 1) * 100)
+```
+
+Assuming independence but not identically distributed. (Huber-Eicker formula for standard errors).
+```{r}
+coeftest(basic_mdl, vcov. = vcovHC(basic_mdl, type = 'HC1'))
+```
+
+****************Assuming heteroscedasticity and autocorrelation.
+```{r}
+vcv <- vcovHAC.default(basic_mdl)
+coeftest(basic_mdl, vcov. = vcovHAC(basic_mdl))
+```
+
+******************* Assuming not independent but identically distributed.
+```{r}
+
+```
+
+***************** Clustering to deal with autocorrelation. At UPC level.
+```{r}
+coeftest(basic_mdl, vcov. = vcovHC(basic_mdl, type = 'HC1', cluster = 'upc'))
+```
+
+********** Look into plm ***********
+
+
+
+
+
+
+
+
+
+
 
 
 
