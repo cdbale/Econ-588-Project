@@ -12,16 +12,14 @@ to make inference using the model based on different implementations of standard
 ***
 
 Install and load packages. Increase memory limit.
-```{r}
+```{r message = FALSE}
 #install.packages('tidyverse')
-#install.packages('quantreg')
 #install.packages('AER')
 #install.packages('plm')
+#install.packages('lfe')
 library(tidyverse)
-library(quantreg)
 library(lubridate)
-library(plm)
-library(AER)
+library(lfe)
 memory.limit(size = 50000)
 ```
 
@@ -199,20 +197,19 @@ and depending on the model, I'll include fixed effects/clustering/random effects
 
 ```{r}
 full_data <- full_data %>%
-  select(upc, 
+  select(upc,
+         week_end,
          store_code_uc, 
          retailer_code, 
          store_zip3, 
-         fips_county_descr, 
-         week_end, 
+         fips_county_descr,
          year,
          units,
          lunits,
          price, 
          size, 
          feature, 
-         display,
-         search_frequency) %>%
+         display) %>%
   drop_na()
 ```
 
@@ -366,6 +363,107 @@ coeftest(basic_mdl, vcov. = vcovHC(basic_mdl, type = 'HC1', cluster = 'upc'))
 ```
 
 ********** Look into plm ***********
+
+```{r}
+full_data <- full_data %>%
+  mutate(f_upc = as_factor(upc), 
+         f_store_code_uc = as_factor(store_code_uc),
+         f_week_end = as_factor(as.character(week_end)),
+         f_size = as_factor(size),
+         f_fips_country_descr = as_factor(fips_county_descr))
+```
+
+Fixed effects model with regular standard errors.
+```{r}
+fe_model <- full_data %>%
+  felm(lunits ~ price + feature + display | f_upc + f_store_code_uc + f_week_end, data = ., exactDOF = 'rM')
+fe_sum <- summary(fe_model)
+summary(fe_model)
+```
+
+Interpretable coefficients.
+```{r}
+(exp(fe_model$coefficients) - 1) * 100
+```
+
+Regular standard errors.
+```{r}
+reg_errors <- fe_model$se
+```
+
+Calculate robust standard errors (independent but not identical)
+```{r}
+(robust_summary <- summary(fe_model, robust = TRUE))
+robust_errors <- robust_summary$coefficients[,2]
+```
+
+Cluster correct standard errors at the upc level.
+```{r}
+upc_cluster_fe_model <- full_data %>%
+  felm(lunits ~ price + feature + display | f_upc + f_store_code_uc + f_week_end | 0 | f_upc, 
+       data = ., 
+       exactDOF = 'rM')
+upc_cluster_fe_sum <- summary(upc_cluster_fe_model)
+upc_cluster_fe_sum
+```
+
+Store standard errors from regression with standard errors clustered at the upc level.
+```{r}
+upc_cluster_se <- upc_cluster_fe_sum$coefficients[,2]
+```
+
+Cluster correct standard errors at the upc and store level.
+```{r}
+store_upc_cluster_fe_model <- full_data %>%
+  felm(lunits ~ price + feature + display | f_upc + f_store_code_uc + f_week_end | 0 | f_upc + f_store_code_uc, 
+       data = ., 
+       exactDOF = 'rM')
+store_upc_cluster_fe_sum <- summary(store_upc_cluster_fe_model)
+store_upc_cluster_fe_sum
+```
+
+Store standard errors cluster corrected at the store and upc level.
+```{r}
+store_upc_cluster_se <- store_upc_cluster_fe_sum$coefficients[,2]
+```
+
+Cluster correct standard errors at the upc, store, and county level.
+```{r}
+county_store_upc_cluster_fe_model <- full_data %>%
+  felm(lunits ~ price + feature + display | f_upc + f_store_code_uc + f_week_end | 0 | f_upc + f_store_code_uc + f_fips_country_descr,
+       data = ., 
+       exactDOF = 'rM')
+county_store_upc_cluster_fe_sum <- summary(county_store_upc_cluster_fe_model)
+county_store_upc_cluster_fe_sum
+```
+
+Store standard errors cluster corrected at the upc, store, and county level.
+```{r}
+county_store_upc_cluster_se <- county_store_upc_cluster_fe_sum$coefficients[,2]
+```
+
+```{r}
+se_vals <- tibble(reg_errors,
+       robust_errors,
+       upc_cluster_se,
+       store_upc_cluster_se,
+       county_store_upc_cluster_se)
+
+reg_errors <- enframe(reg_errors, name = "Variable", value = "Normal")
+robust_errors <- enframe(robust_errors, name = "Variable", value = "Robust")
+upc_cluster_se <- enframe(upc_cluster_se, name = "Variable", value = "Clustered at UPC")
+store_upc_cluster_se <- enframe(store_upc_cluster_se, name = "Variable", value = "Clustered at UPC and Store")
+county_store_upc_cluster_se <- enframe(county_store_upc_cluster_se, name = "Variable", 
+                                       value = "Clustered at UPC, Store, and County")
+errors <- reg_errors %>%
+  left_join(robust_errors, by = "Variable") %>%
+  left_join(upc_cluster_se, by = "Variable") %>%
+  left_join(store_upc_cluster_se, by = "Variable") %>%
+  left_join(county_store_upc_cluster_se, by = "Variable")
+
+errors %>%
+  mutate_if(is.numeric, ~ round(., digits = 5))
+```
 
 
 
