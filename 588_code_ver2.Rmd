@@ -20,6 +20,8 @@ Install and load packages. Increase memory limit.
 library(tidyverse)
 library(lubridate)
 library(lfe)
+library(boot)
+library(scales)
 memory.limit(size = 50000)
 ```
 
@@ -168,7 +170,7 @@ save(full_data, file = 'full_data.RData')
 
 Load data.
 ```{r}
-#load('full_data.RData')
+load('full_data.RData')
 ```
 
 # Model
@@ -195,22 +197,27 @@ and depending on the model, I'll include fixed effects/clustering/random effects
 * **store_zip** : identifies the first three digits of store zip code
 * **fips_county** : identifies the county a store is located in
 
+Select variables of interest.
 ```{r}
 full_data <- full_data %>%
   select(upc,
+         brand_code_uc,
          week_end,
          store_code_uc, 
          retailer_code, 
-         store_zip3, 
          fips_county_descr,
-         year,
          units,
          lunits,
-         price, 
-         size, 
+         price,
          feature, 
          display) %>%
-  drop_na()
+  drop_na() %>%
+  mutate(f_upc = as_factor(upc), 
+         f_store_code_uc = as_factor(store_code_uc),
+         f_week_end = as_factor(as.character(week_end)),
+         f_fips_county_descr = as_factor(fips_county_descr),
+         f_brand_code_uc = as_factor(brand_code_uc),
+         f_retailer_code = as_factor(retailer_code))
 ```
 
 Visualize data.
@@ -223,160 +230,13 @@ full_data %>%
        title = 'Natural Log of Units Sold Against Price')
 ```
 
-Run model.
-```{r}
-(mdl_sum <- full_data %>%
-  lm(lunits ~ price + size + feature + display + search_frequency, data = .) %>%
-  summary())
-```
-
-Converting coefficients to be intrepreted as, for a 1 unit increase in the independent variable, the the number of
-units sold changes by __ percent.
-```{r}
-(mdl_sum$coefficients[,1] <- (exp(mdl_sum$coefficients[,1]) - 1) * 100)
-```
-
-Examining proxy variable. We want it to be correlated with a variable that is difficult or impossible to measure.
-In this case, the google search frequency is a proxy for seasonality.
-```{r}
-cor(full_data$lunits, full_data$search_frequency)
-```
-
-# Ice Cream
-
-Read in files for 2011 (and products file). Merge the data from the 'stores' file and the 'products' master file to the movement file. Filter for channel code 'F', which denotes 'Food' and 
-for the 4 states where supervalue operates (North Dakota, Minnesota, Missouri, and D.C.).
-
-```{r}
-untar("ice_cream.tgz")
-
-move_11<-read_tsv("nielsen_extracts/RMS/2011/Movement_Files/2005_2011/2672_2011.tsv")
-stores_11<-read_tsv("nielsen_extracts/RMS/2011/Annual_Files/stores_2011.tsv")
-products<-read_tsv("nielsen_extracts/RMS/Master_Files/Latest/products.tsv", quote="")
-
-full_11 <- move_11 %>%
-  inner_join(stores_11, by ="store_code_uc") %>% 
-  filter(channel_code == "F" & fips_state_descr == 'UT') %>%
-  inner_join(products, by ="upc")
-
-rm(move_11, stores_11)
-```
-
-Read in files for 2012. Merge the data from the 'stores' file and the 'products' master file to the movement file. Filter for channel code 'F', which denotes 'Food' and 
-for the 4 states where supervalue operates (North Dakota, Minnesota, Missouri, and D.C.).Remove move/stores files from 2011 and 2012 for memory space. 
-
-```{r}
-move_12<-read_tsv("nielsen_extracts/RMS/2012/Movement_Files/2005_2012/2672_2012.tsv")
-stores_12<-read_tsv("nielsen_extracts/RMS/2012/Annual_Files/stores_2012.tsv")
-
-full_12 <- move_12 %>%
-  inner_join(stores_12, by ="store_code_uc") %>% 
-  filter(channel_code == "F" & fips_state_descr == 'UT') %>%
-  inner_join(products, by ="upc")
-
-rm(move_12, stores_12)
-```
-
-Read in files for 2013. Merge the data from the 'stores' file and the 'products' master file to the movement file. Filter for channel code 'F', which denotes 'Food' and 
-for the 4 states where supervalue operates (North Dakota, Minnesota, Missouri, and D.C.).
-
-```{r}
-move_13<-read_tsv("nielsen_extracts/RMS/2013/Movement_Files/2005_2013/2672_2013.tsv")
-stores_13<-read_tsv("nielsen_extracts/RMS/2013/Annual_Files/stores_2013.tsv", guess_max = 200000)
-
-full_13 <- move_13 %>%
-  inner_join(stores_13, by ="store_code_uc") %>% 
-  filter(channel_code == "F" & fips_state_descr == 'UT') %>%
-  inner_join(products, by ="upc")
-```
-
-Combine 'full_11', 'full_12', and 'full_13' into one file, 'full_11_12_13' containing the data for all years.
-Change 'week_end' variable to year-month-day format.
-
-```{r}
-full_data <- full_11 %>%
-  bind_rows(full_12) %>%
-  bind_rows(full_13) %>%
-  mutate(week_end = ymd(week_end))
-```
-
-Read in ice cream trends data.
-```{r}
-trends <- read_csv('ice_cream_trends.csv') %>%
-  mutate(week_end = mdy(week_end) + 6)
-```
-
-Add google search trends to full data.
-```{r}
-full_data <- full_data %>%
-  left_join(trends, by = 'week_end')
-```
-
-Plot search frequency against units sold.
-```{r}
-full_data %>%
-  group_by(week_end) %>%
-  summarize(sales = sum(units * price), level_of_interest = mean(level_of_interest)) %>%
-  gather(key = which_line, value = amount, -week_end) %>%
-  ggplot(aes(x = week_end, y = log(amount), color = which_line)) +
-  geom_line()
-```
-
-```{r}
-cor(full_data$units, full_data$level_of_interest)
-```
-
-# Working with the Standard Errors
-
-With regular standard errors.
-```{r}
-basic_mdl <- full_data %>%
-  lm(lunits ~ price + size + feature + display, data = .)
-
-(basic_mdl_sum <- summary(basic_mdl))
-```
-
-Getting the proper coefficients.
-```{r}
-(basic_mdl_sum$coefficients[,1] <- (exp(basic_mdl_sum$coefficients[,1]) - 1) * 100)
-```
-
-Assuming independence but not identically distributed. (Huber-Eicker formula for standard errors).
-```{r}
-coeftest(basic_mdl, vcov. = vcovHC(basic_mdl, type = 'HC1'))
-```
-
-****************Assuming heteroscedasticity and autocorrelation.
-```{r}
-vcv <- vcovHAC.default(basic_mdl)
-coeftest(basic_mdl, vcov. = vcovHAC(basic_mdl))
-```
-
-******************* Assuming not independent but identically distributed.
-```{r}
-
-```
-
-***************** Clustering to deal with autocorrelation. At UPC level.
-```{r}
-coeftest(basic_mdl, vcov. = vcovHC(basic_mdl, type = 'HC1', cluster = 'upc'))
-```
-
-********** Look into plm ***********
-
-```{r}
-full_data <- full_data %>%
-  mutate(f_upc = as_factor(upc), 
-         f_store_code_uc = as_factor(store_code_uc),
-         f_week_end = as_factor(as.character(week_end)),
-         f_size = as_factor(size),
-         f_fips_country_descr = as_factor(fips_county_descr))
-```
-
 Fixed effects model with regular standard errors.
 ```{r}
 fe_model <- full_data %>%
-  felm(lunits ~ price + feature + display | f_upc + f_store_code_uc + f_week_end, data = ., exactDOF = 'rM')
+  felm(lunits ~ price + feature + display | 
+                f_upc + f_brand_code_uc + f_store_code_uc + f_retailer_code + f_week_end + f_fips_county_descr, 
+       data = ., exactDOF = 'rM')
+
 fe_sum <- summary(fe_model)
 summary(fe_model)
 ```
@@ -386,7 +246,7 @@ Interpretable coefficients.
 (exp(fe_model$coefficients) - 1) * 100
 ```
 
-Regular standard errors.
+Store regular standard errors.
 ```{r}
 reg_errors <- fe_model$se
 ```
@@ -397,12 +257,49 @@ Calculate robust standard errors (independent but not identical)
 robust_errors <- robust_summary$coefficients[,2]
 ```
 
+Perform bootstrapping to compare standard errors to robust.
+```{r message = FALSE}
+# function to obtain regression weights 
+bs <- function(formula, data, indices) {
+  d <- data[indices,] # allows boot to select sample 
+  fit <- felm(formula, data=d, exactDOF = 'rM')
+  return(coef(fit)) 
+} 
+# bootstrapping with 1000 replications 
+results <- boot(data=full_data, statistic=bs, 
+   R=1000, formula=lunits ~ price + feature + display | 
+                f_upc + f_brand_code_uc + f_store_code_uc + f_retailer_code + f_week_end + f_fips_county_descr)
+
+bs_dists <- as_tibble(results$t, .name_repair = "universal")
+
+names(bs_dists) <- c('Price', 'Feature', 'Display')
+
+bs_dists <- bs_dists %>%
+  gather(key = 'variable', value = 'estimate')
+
+price_ests <- bs_dists %>%
+  filter(variable == 'Price')
+
+price_qs <- quantile(price_ests$estimate, c(0.025, 0.975))
+
+price_ests %>%
+  ggplot(aes(x = estimate)) +
+  geom_density() +
+  geom_vline(xintercept = price_qs, color = 'blue') +
+  geom_vline(xintercept = results$t0[1], color = 'red') +
+  labs(title = 'Bootstrapped Price Coefficient Estimates',
+       x = 'Estimate',
+       y = 'Density')
+```
+
 Cluster correct standard errors at the upc level.
 ```{r}
 upc_cluster_fe_model <- full_data %>%
-  felm(lunits ~ price + feature + display | f_upc + f_store_code_uc + f_week_end | 0 | f_upc, 
-       data = ., 
-       exactDOF = 'rM')
+  felm(lunits ~ price + feature + display | 
+                f_upc + f_brand_code_uc + f_store_code_uc + f_retailer_code + f_week_end + f_fips_county_descr | 0 |
+                f_upc, 
+       data = ., exactDOF = 'rM')
+
 upc_cluster_fe_sum <- summary(upc_cluster_fe_model)
 upc_cluster_fe_sum
 ```
@@ -415,9 +312,11 @@ upc_cluster_se <- upc_cluster_fe_sum$coefficients[,2]
 Cluster correct standard errors at the upc and store level.
 ```{r}
 store_upc_cluster_fe_model <- full_data %>%
-  felm(lunits ~ price + feature + display | f_upc + f_store_code_uc + f_week_end | 0 | f_upc + f_store_code_uc, 
-       data = ., 
-       exactDOF = 'rM')
+  felm(lunits ~ price + feature + display | 
+                f_upc + f_brand_code_uc + f_store_code_uc + f_retailer_code + f_week_end + f_fips_county_descr | 0 |
+                f_upc + f_store_code_uc, 
+       data = ., exactDOF = 'rM')
+
 store_upc_cluster_fe_sum <- summary(store_upc_cluster_fe_model)
 store_upc_cluster_fe_sum
 ```
@@ -427,42 +326,24 @@ Store standard errors cluster corrected at the store and upc level.
 store_upc_cluster_se <- store_upc_cluster_fe_sum$coefficients[,2]
 ```
 
-Cluster correct standard errors at the upc, store, and county level.
-```{r}
-county_store_upc_cluster_fe_model <- full_data %>%
-  felm(lunits ~ price + feature + display | f_upc + f_store_code_uc + f_week_end | 0 | f_upc + f_store_code_uc + f_fips_country_descr,
-       data = ., 
-       exactDOF = 'rM')
-county_store_upc_cluster_fe_sum <- summary(county_store_upc_cluster_fe_model)
-county_store_upc_cluster_fe_sum
-```
-
-Store standard errors cluster corrected at the upc, store, and county level.
-```{r}
-county_store_upc_cluster_se <- county_store_upc_cluster_fe_sum$coefficients[,2]
-```
-
 ```{r}
 se_vals <- tibble(reg_errors,
        robust_errors,
        upc_cluster_se,
-       store_upc_cluster_se,
-       county_store_upc_cluster_se)
+       store_upc_cluster_se)
 
 reg_errors <- enframe(reg_errors, name = "Variable", value = "Normal")
 robust_errors <- enframe(robust_errors, name = "Variable", value = "Robust")
-upc_cluster_se <- enframe(upc_cluster_se, name = "Variable", value = "Clustered at UPC")
-store_upc_cluster_se <- enframe(store_upc_cluster_se, name = "Variable", value = "Clustered at UPC and Store")
-county_store_upc_cluster_se <- enframe(county_store_upc_cluster_se, name = "Variable", 
-                                       value = "Clustered at UPC, Store, and County")
+upc_cluster_se <- enframe(upc_cluster_se, name = "Variable", value = "Cluster: UPC")
+store_upc_cluster_se <- enframe(store_upc_cluster_se, name = "Variable", value = "Clustered: UPC + Store")
+
 errors <- reg_errors %>%
   left_join(robust_errors, by = "Variable") %>%
   left_join(upc_cluster_se, by = "Variable") %>%
-  left_join(store_upc_cluster_se, by = "Variable") %>%
-  left_join(county_store_upc_cluster_se, by = "Variable")
+  left_join(store_upc_cluster_se, by = "Variable")
 
 errors %>%
-  mutate_if(is.numeric, ~ round(., digits = 5))
+  mutate_if(is.numeric, ~ round(., digits = 4))
 ```
 
 
