@@ -17,12 +17,16 @@ Install and load packages. Increase memory limit.
 #install.packages('AER')
 #install.packages('plm')
 #install.packages('lfe')
+#install.packages('boot')
+#install.packages('scales')
+#install.packages('stargazer')
 library(tidyverse)
 library(lubridate)
 library(lfe)
 library(boot)
 library(scales)
-memory.limit(size = 50000)
+library(stargazer)
+#memory.limit(size = 50000)
 ```
 
 # Reading in the Data
@@ -211,13 +215,19 @@ full_data <- full_data %>%
          price,
          feature, 
          display) %>%
-  drop_na() %>%
+  drop_na() %>%  
   mutate(f_upc = as_factor(upc), 
-         f_store_code_uc = as_factor(store_code_uc),
+         f_store_code_uc = as_factor(as.character(store_code_uc)),
          f_week_end = as_factor(as.character(week_end)),
          f_fips_county_descr = as_factor(fips_county_descr),
-         f_brand_code_uc = as_factor(brand_code_uc),
-         f_retailer_code = as_factor(retailer_code))
+         f_brand_code_uc = as_factor(as.character(brand_code_uc)),
+         f_retailer_code = as_factor(as.character(retailer_code)))
+```
+
+Provide table of data.
+```{r}
+top10 <- full_data[1:10,]
+stargazer(top10, summary = FALSE, out = 'data_table.html')
 ```
 
 Visualize data.
@@ -241,9 +251,15 @@ fe_sum <- summary(fe_model)
 summary(fe_model)
 ```
 
+Output regression table for regular model.
+```{r}
+stargazer(fe_model, title = 'Regression Results', out = 'reg_results.html')
+```
+
 Interpretable coefficients.
 ```{r}
-(exp(fe_model$coefficients) - 1) * 100
+int_coeffs <- (exp(fe_model$coefficients) - 1) * 100
+stargazer(int_coeffs, title = 'Transformed Coefficients', out = 'int_coeffs.html')
 ```
 
 Store regular standard errors.
@@ -292,6 +308,11 @@ price_ests %>%
        y = 'Density')
 ```
 
+Store bootstrapped standard errors.
+```{r}
+bs_ses = sapply(data.frame(results$t), sd)
+```
+
 Cluster correct standard errors at the upc level.
 ```{r}
 upc_cluster_fe_model <- full_data %>%
@@ -326,6 +347,7 @@ Store standard errors cluster corrected at the store and upc level.
 store_upc_cluster_se <- store_upc_cluster_fe_sum$coefficients[,2]
 ```
 
+Create a table of standard errors.
 ```{r}
 se_vals <- tibble(reg_errors,
        robust_errors,
@@ -335,18 +357,45 @@ se_vals <- tibble(reg_errors,
 reg_errors <- enframe(reg_errors, name = "Variable", value = "Normal")
 robust_errors <- enframe(robust_errors, name = "Variable", value = "Robust")
 upc_cluster_se <- enframe(upc_cluster_se, name = "Variable", value = "Cluster: UPC")
-store_upc_cluster_se <- enframe(store_upc_cluster_se, name = "Variable", value = "Clustered: UPC + Store")
+store_upc_cluster_se <- enframe(store_upc_cluster_se, name = "Variable", value = "Cluster: UPC + Store")
+
+bs_df <- tibble(
+  Variable = c('price', 'feature', 'display'),
+  Bootstrapped = bs_ses
+)
 
 errors <- reg_errors %>%
   left_join(robust_errors, by = "Variable") %>%
+  left_join(bs_df, by = "Variable") %>%
   left_join(upc_cluster_se, by = "Variable") %>%
   left_join(store_upc_cluster_se, by = "Variable")
 
-errors %>%
-  mutate_if(is.numeric, ~ round(., digits = 4))
+(errors <- errors %>%
+  mutate_if(is.numeric, ~ round(., digits = 4)))
 ```
 
+```{r}
+stargazer(errors, summary = FALSE, out = 'error_table.html')
+```
 
+Outputting regression results in one table.
+```{r}
+robust_se <- robust_summary$coefficients[,2]
+
+stargazer(fe_model, fe_model, fe_model, upc_cluster_fe_model, store_upc_cluster_fe_model,
+          out = 'combined_table.html',
+          se = list(NULL, robust_se, as.vector(bs_ses)),
+          digits = 5,
+          omit.stat = c('ser', 'rsq'),
+          covariate.labels = c('Price', 'Feature', 'Display'),
+          dep.var.caption = "",
+          column.labels = c('Regular', 
+                            'Robust', 
+                            'BS', 
+                            'UPC Cluster', 
+                            'UPC/Store Cluster'),
+          dep.var.labels.include = FALSE)
+```
 
 
 
