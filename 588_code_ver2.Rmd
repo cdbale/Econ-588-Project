@@ -253,13 +253,25 @@ summary(fe_model)
 
 Output regression table for regular model.
 ```{r}
-stargazer(fe_model, title = 'Regression Results', out = 'reg_results.html')
+stargazer(fe_model, 
+          title = 'Regression Results', 
+          out = 'reg_results.html',
+          dep.var.caption = "")
 ```
 
 Interpretable coefficients.
 ```{r}
 int_coeffs <- (exp(fe_model$coefficients) - 1) * 100
-stargazer(int_coeffs, title = 'Transformed Coefficients', out = 'int_coeffs.html')
+
+int_coeffs <- as_tibble(int_coeffs) %>%
+  mutate(Variable = c('Price', 'Feature', 'Display'),
+         Coefficient = round(lunits, digits = 2)) %>%
+  select(Variable, "Coefficient")
+
+stargazer(int_coeffs, 
+          title = 'Transformed Coefficients',
+          summary = FALSE,
+          out = 'int_coeffs.html')
 ```
 
 Store regular standard errors.
